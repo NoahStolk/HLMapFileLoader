@@ -1,23 +1,22 @@
-﻿using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Graphics;
 using System.Collections.Generic;
+using System.Numerics;
 
-namespace HLMapFileLoader
+namespace HLMapFileLoader;
+
+public class Polygon
 {
-    public class Polygon
+    public Polygon(Plane plane, Face face)
     {
-        public List<Vector3> Vertices { get; set; }
-        public List<Vector2> TextureScales { get; set; }
-        public Plane Plane { get; private set; }
-        public Face Face { get; private set; }
-        public Texture2D Texture { get; set; }
-
-        public Polygon(Plane plane, Face face)
-        {
-            this.Face = face;
-            this.TextureScales = new List<Vector2>();
-            this.Vertices = new List<Vector3>();
-            this.Plane = plane;
-        }
+        Face = face;
+        TextureScales = new();
+        Vertices = new();
+        Plane = plane;
+        Texture = new(16, 16); // TODO: Get from face.TextureName
     }
+
+    public List<Vector3> Vertices { get; }
+    public List<Vector2> TextureScales { get; }
+    public Plane Plane { get; }
+    public Face Face { get; }
+    public Texture Texture { get; }
 }

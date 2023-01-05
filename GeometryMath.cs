@@ -1,294 +1,228 @@
-﻿using System;
-using Microsoft.Xna.Framework;
+using System;
+using System.Numerics;
 
-namespace HLMapFileLoader
+namespace HLMapFileLoader;
+
+public static class GeometryMath
 {
-    public class GeometryMath
+    private const double _epsilon = 1e-3;
+
+    public enum ECp
     {
-        private static double epsilon = 1e-3;
-        public enum eCP { FRONT = 0, BACK, ONPLANE };
+        Front = 0,
+        Back = 1,
+        OnPlane = 2,
+    }
 
-        public static float DistanceToPlane(Vector3 vector, Plane plane)
+    private static float DistanceToPlane(Vector3 vector, Plane plane)
+    {
+        return Vector3.Dot(plane.Normal, vector) + plane.D;
+    }
+
+    public static ECp ClassifyPoint(Vector3 vector, Plane plane)
+    {
+        float distance = DistanceToPlane(vector, plane);
+
+        if (distance > _epsilon)
+            return ECp.Front;
+
+        return distance < -_epsilon ? ECp.Back : ECp.OnPlane;
+    }
+
+    public static bool GetIntersection(Plane p1, Plane p2, Plane p3, out Vector3 v)
+    {
+        v = new(0, 0, 0);
+
+        float denominator = Vector3.Dot(p3.Normal, Vector3.Cross(p1.Normal, p2.Normal));
+
+        if (Math.Abs(denominator) < _epsilon)
+            return false;
+
+        v = (Vector3.Cross(p1.Normal, p2.Normal) * -p3.D
+            - Vector3.Cross(p2.Normal, p3.Normal) * p1.D
+            - Vector3.Cross(p3.Normal, p1.Normal) * p2.D) / denominator;
+
+        return true;
+    }
+
+    public static void SortVerticesCw(Polygon poly)
+    {
+        Vector3 center = Vector3.Zero;
+        foreach (Vector3 vector in poly.Vertices)
+            center += vector;
+
+        center /= poly.Vertices.Count;
+
+        for (int i = 0; i < poly.Vertices.Count - 2; i++)
         {
-            return Vector3.Dot(plane.Normal, vector) + plane.D;
-        }
+            double smallestAngle = -1;
+            int smallest = -1;
 
-        public static eCP ClassifyPoint(Vector3 vector, Plane plane)
-        {
-            float distance = DistanceToPlane(vector, plane);
+            Vector3 a = Vector3.Normalize(poly.Vertices[i] - center);
 
-            if (distance > epsilon)
+            Plane p = Plane.CreateFromVertices(poly.Vertices[i], center, center + poly.Plane.Normal);
+
+            for (int j = i + 1; j < poly.Vertices.Count; j++)
             {
-                return eCP.FRONT;
-            }
-            else if (distance < -epsilon)
-            {
-                return eCP.BACK;
-            }
-
-            return eCP.ONPLANE;
-        }
-
-        public static bool GetIntersection(Plane p1, Plane p2, Plane p3, out Vector3 v)
-        {
-            v = new Vector3(0, 0, 0);
-
-            float denom;
-            denom = Vector3.Dot(p3.Normal, Vector3.Cross(p1.Normal, p2.Normal));
-
-            if (Math.Abs(denom) < epsilon)
-            {
-                return false;
-            }
-
-            v = ((Vector3.Cross(p1.Normal, p2.Normal) * -p3.D)
-                - (Vector3.Cross(p2.Normal, p3.Normal) * p1.D)
-                - (Vector3.Cross(p3.Normal, p1.Normal) * p2.D)) / denom;
-
-            return true;
-        }
-
-        public static void SortVerticesCW(Polygon poly)
-        {
-            Vector3 center = new Vector3();
-
-            foreach (Vector3 vector in poly.Vertices)
-            {
-                center += vector;
-            }
-
-            center = center / poly.Vertices.Count;
-
-            for (int i = 0; i < (poly.Vertices.Count - 2); i++)
-            {
-                Vector3 a;
-                Plane p;
-                double SmallestAngle = -1;
-                int Smallest = -1;
-
-                a = poly.Vertices[i] - center;
-                a.Normalize();
-
-                p = new Plane(poly.Vertices[i], center, center + poly.Plane.Normal);
-
-                for (int j = i + 1; j < poly.Vertices.Count; j++)
+                if (ClassifyPoint(poly.Vertices[j], p) != ECp.Back)
                 {
-                    if (ClassifyPoint(poly.Vertices[j], p) != eCP.BACK)
+                    Vector3 b = Vector3.Normalize(poly.Vertices[j] - center);
+
+                    double angle = Vector3.Dot(a, b);
+
+                    if (angle > smallestAngle)
                     {
-                        Vector3 b;
-                        double Angle;
-
-                        b = poly.Vertices[j] - center;
-                        b.Normalize();
-
-                        Angle = Vector3.Dot(a, b);
-
-                        if (Angle > SmallestAngle)
-                        {
-                            SmallestAngle = Angle;
-                            Smallest = j;
-                        }
+                        smallestAngle = angle;
+                        smallest = j;
                     }
                 }
-
-                if (Smallest == -1)
-                {
-                    return;
-                }
-
-                Vector3 t = poly.Vertices[Smallest];
-                poly.Vertices[Smallest] = poly.Vertices[i + 1];
-                poly.Vertices[i + 1] = t;
             }
 
-            Plane beforePlane = poly.Plane;
-            Plane afterPlane;
-
-            CalculatePlane(poly, out afterPlane);
-
-            if (Vector3.Dot(afterPlane.Normal, beforePlane.Normal) < 0)
+            if (smallest == -1)
             {
-                int j = poly.Vertices.Count;
-                
-                for (int i = 0; i < j / 2; i++)
-                {
-                    Vector3 v = poly.Vertices[i];
-                    poly.Vertices[i] = poly.Vertices[j - i - 1];
-                    poly.Vertices[j - i - 1] = v;
-                }
+                return;
             }
+
+            (poly.Vertices[smallest], poly.Vertices[i + 1]) = (poly.Vertices[i + 1], poly.Vertices[smallest]);
         }
 
-        public static void CalculateTextureCoordinates(Polygon poly)
+        Plane beforePlane = poly.Plane;
+
+        CalculatePlane(poly, out Plane afterPlane);
+
+        if (Vector3.Dot(afterPlane.Normal, beforePlane.Normal) < 0)
         {
-            for (int i = 0; i < poly.Vertices.Count; i++)
+            int j = poly.Vertices.Count;
+
+            for (int i = 0; i < j / 2; i++)
             {
-                float U, V;
-                
-                U = Vector3.Dot(poly.Face.TextureAxisU.Normal, poly.Vertices[i]);
-                U = U / poly.Texture.Width / poly.Face.TextureScale[0];
-                U = U + (poly.Face.TextureAxisU.D / poly.Texture.Width);
+                (poly.Vertices[i], poly.Vertices[j - i - 1]) = (poly.Vertices[j - i - 1], poly.Vertices[i]);
+            }
+        }
+    }
 
-                V = Vector3.Dot(poly.Face.TextureAxisV.Normal, poly.Vertices[i]);
-                V = V / poly.Texture.Height / poly.Face.TextureScale[1];
-                V = V + (poly.Face.TextureAxisV.D / poly.Texture.Height);
+    public static void CalculateTextureCoordinates(Polygon poly)
+    {
+        for (int i = 0; i < poly.Vertices.Count; i++)
+        {
+            float u = Vector3.Dot(poly.Face.TextureAxisU.Normal, poly.Vertices[i]);
+            u = u / poly.Texture.Width / poly.Face.TextureScale[0];
+            u = u + poly.Face.TextureAxisU.D / poly.Texture.Width;
 
-                poly.TextureScales.Add(new Vector2(U, V));
+            float v = Vector3.Dot(poly.Face.TextureAxisV.Normal, poly.Vertices[i]);
+            v = v / poly.Texture.Height / poly.Face.TextureScale[1];
+            v = v + poly.Face.TextureAxisV.D / poly.Texture.Height;
+
+            poly.TextureScales.Add(new(u, v));
+        }
+
+        bool bDoU = true;
+        bool bDoV = true;
+        for (int i = 0; i < poly.Vertices.Count; i++)
+        {
+            if (poly.TextureScales[i].X < 1 && poly.TextureScales[i].Y > -1)
+                bDoU = false;
+
+            if (poly.TextureScales[i].X < 1 && poly.TextureScales[i].Y > -1)
+                bDoV = false;
+        }
+
+        if (bDoU || bDoV)
+        {
+            double nearestU = 0;
+            double u = poly.TextureScales[0].X;
+
+            double nearestV = 0;
+            double v = poly.TextureScales[0].Y;
+
+            if (bDoU)
+            {
+                nearestU = u > 1 ? Math.Floor(u) : Math.Ceiling(u);
             }
 
-            bool bDoU = true;
-            bool bDoV = true;
-            for (int i = 0; i < poly.Vertices.Count; i++)
+            if (bDoV)
             {
-                if ((poly.TextureScales[i].X < 1) && (poly.TextureScales[i].Y > -1))
-                {
-                    bDoU = false;
-                }
-
-                if ((poly.TextureScales[i].X < 1) && (poly.TextureScales[i].Y > -1))
-                {
-                    bDoV = false;
-                }
+                nearestV = v > 1 ? Math.Floor(v) : Math.Ceiling(v);
             }
 
-            if (bDoU || bDoV)
+            for (int i = 0; i < poly.Vertices.Count; i++)
             {
-                double NearestU = 0;
-                double U = poly.TextureScales[0].X;
-
-                double NearestV = 0;
-                double V = poly.TextureScales[0].Y;
-
                 if (bDoU)
                 {
-                    if (U > 1)
+                    u = poly.TextureScales[i].X;
+
+                    if (Math.Abs(u) < Math.Abs(nearestU))
                     {
-                        NearestU = Math.Floor(U);
-                    }
-                    else
-                    {
-                        NearestU = Math.Ceiling(U);
+                        nearestU = u > 1 ? Math.Floor(u) : Math.Ceiling(u);
                     }
                 }
 
                 if (bDoV)
                 {
-                    if (V > 1)
+                    v = poly.TextureScales[i].Y;
+
+                    if (Math.Abs(v) < Math.Abs(nearestV))
                     {
-                        NearestV = Math.Floor(V);
-                    }
-                    else
-                    {
-                        NearestV = Math.Ceiling(V);
+                        nearestV = v > 1 ? Math.Floor(v) : Math.Ceiling(v);
                     }
                 }
+            }
 
-                for (int i = 0; i < poly.Vertices.Count; i++)
-                {
-                    if (bDoU)
-                    {
-                        U = poly.TextureScales[i].X;
-
-                        if (Math.Abs(U) < Math.Abs(NearestU))
-                        {
-                            if (U > 1)
-                            {
-                                NearestU = Math.Floor(U);
-                            }
-                            else
-                            {
-                                NearestU = Math.Ceiling(U);
-                            }
-                        }
-                    }
-
-                    if (bDoV)
-                    {
-                        V = poly.TextureScales[i].Y;
-
-                        if (Math.Abs(V) < Math.Abs(NearestV))
-                        {
-                            if (V > 1)
-                            {
-                                NearestV = Math.Floor(V);
-                            }
-                            else
-                            {
-                                NearestV = Math.Ceiling(V);
-                            }
-                        }
-                    }
-                }
-
-                for (int i = 0; i < poly.Vertices.Count; i++)
-                {
-                    poly.TextureScales[i] = new Vector2(poly.TextureScales[i].X - (float)NearestU, poly.TextureScales[i].Y - (float)NearestV);
-                }
+            for (int i = 0; i < poly.Vertices.Count; i++)
+            {
+                poly.TextureScales[i] = new(poly.TextureScales[i].X - (float)nearestU, poly.TextureScales[i].Y - (float)nearestV);
             }
         }
+    }
 
-        public static void CalculatePlane(Polygon poly, out Plane plane)
+    private static void CalculatePlane(Polygon poly, out Plane plane)
+    {
+        plane = poly.Plane;
+
+        if (poly.Vertices.Count < 3)
+            return;
+
+        plane.Normal.X = 0f;
+        plane.Normal.Y = 0f;
+        plane.Normal.Z = 0f;
+
+        Vector3 centerOfMass = Vector3.Zero;
+        for (int i = 0; i < poly.Vertices.Count; i++)
         {
-            Vector3 centerOfMass;
-            double magnitude;
-            int i, j;
+            int j = i + 1;
 
-            plane = poly.Plane;
+            if (j >= poly.Vertices.Count)
+                j = 0;
 
-            if (poly.Vertices.Count < 3)
-            {
-                return;
-            }
+            plane.Normal.X += (poly.Vertices[i].Y - poly.Vertices[j].Y) * (poly.Vertices[i].Z + poly.Vertices[j].Z);
+            plane.Normal.Y += (poly.Vertices[i].Z - poly.Vertices[j].Z) * (poly.Vertices[i].X + poly.Vertices[j].X);
+            plane.Normal.Z += (poly.Vertices[i].X - poly.Vertices[j].X) * (poly.Vertices[i].Y + poly.Vertices[j].Y);
 
-            plane.Normal.X = 0f;
-            plane.Normal.Y = 0f;
-            plane.Normal.Z = 0f;
-            centerOfMass.X = 0;
-            centerOfMass.Y = 0;
-            centerOfMass.Z = 0;
+            centerOfMass.X += poly.Vertices[i].X;
+            centerOfMass.Y += poly.Vertices[i].Y;
+            centerOfMass.Z += poly.Vertices[i].Z;
+        }
 
-            for (i = 0; i < poly.Vertices.Count; i++)
-            {
-                j = i + 1;
-
-                if (j >= poly.Vertices.Count)
-                {
-                    j = 0;
-                }
-
-                plane.Normal.X += (poly.Vertices[i].Y - poly.Vertices[j].Y) * (poly.Vertices[i].Z + poly.Vertices[j].Z);
-                plane.Normal.Y += (poly.Vertices[i].Z - poly.Vertices[j].Z) * (poly.Vertices[i].X + poly.Vertices[j].X);
-                plane.Normal.Z += (poly.Vertices[i].X - poly.Vertices[j].X) * (poly.Vertices[i].Y + poly.Vertices[j].Y);
-
-                centerOfMass.X += poly.Vertices[i].X;
-                centerOfMass.Y += poly.Vertices[i].Y;
-                centerOfMass.Z += poly.Vertices[i].Z;
-            }
-
-            if ((Math.Abs(plane.Normal.X) < epsilon) && (Math.Abs(plane.Normal.Y) < epsilon)
-                && (Math.Abs(plane.Normal.Z) < epsilon))
-            {
-                return;
-            }
-
-            magnitude = Math.Sqrt(plane.Normal.X * plane.Normal.X + plane.Normal.Y * plane.Normal.Y + plane.Normal.Z * plane.Normal.Z);
-
-            if (magnitude < epsilon)
-            {
-                return;
-            }
-
-            plane.Normal.X /= (float)magnitude;
-            plane.Normal.Y /= (float)magnitude;
-            plane.Normal.Z /= (float)magnitude;
-
-            centerOfMass.X /= poly.Vertices.Count;
-            centerOfMass.Y /= poly.Vertices.Count;
-            centerOfMass.Z /= poly.Vertices.Count;
-
-            plane.D = -(Vector3.Dot(centerOfMass, plane.Normal));
-
+        if (Math.Abs(plane.Normal.X) < _epsilon &&
+            Math.Abs(plane.Normal.Y) < _epsilon &&
+            Math.Abs(plane.Normal.Z) < _epsilon)
+        {
             return;
         }
+
+        double magnitude = Math.Sqrt(plane.Normal.X * plane.Normal.X + plane.Normal.Y * plane.Normal.Y + plane.Normal.Z * plane.Normal.Z);
+
+        if (magnitude < _epsilon)
+            return;
+
+        plane.Normal.X /= (float)magnitude;
+        plane.Normal.Y /= (float)magnitude;
+        plane.Normal.Z /= (float)magnitude;
+
+        centerOfMass.X /= poly.Vertices.Count;
+        centerOfMass.Y /= poly.Vertices.Count;
+        centerOfMass.Z /= poly.Vertices.Count;
+
+        plane.D = -Vector3.Dot(centerOfMass, plane.Normal);
     }
 }
